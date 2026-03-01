@@ -1,4 +1,4 @@
-import random
+﻿import random
 
 
 def clamp(value, min_value, max_value):
@@ -69,27 +69,35 @@ class Zone:
             return "FAULT"
         if self.manual_call:
             return "ALARM"
+        if self.fire_active or self.smoke_active:
+            return "ALARM"
         if self.temp >= 65 or self.smoke >= 60 or self.co >= 55:
             return "ALARM"
-        if self.temp >= 50 or self.smoke >= 40 or self.co >= 35:
-            return "PREALARM"
         return "NORMAL"
 
-    def clear_events(self, clear_fault):
+    def normalize_readings(self):
+        self.temp = self.base_temp
+        self.smoke = self.base_smoke
+        self.co = self.base_co
+
+    def clear_events(self, clear_fault, normalize=False):
         self.fire_active = False
         self.smoke_active = False
         self.manual_call = False
         if clear_fault:
             self.fault_active = False
+        if normalize:
+            self.normalize_readings()
+        self.status = self.evaluate_status()
 
 
 class FireAlarmSim:
-    def __init__(self, zone_count=6, zone_name_factory=None):
+    def __init__(self, zone_count=15, zone_name_factory=None):
         if zone_name_factory is None:
             zone_name_factory = lambda i: f"Zone {i + 1}"
         self.zones = [Zone(zone_name_factory(i)) for i in range(zone_count)]
         self.tick_count = 0
-        self.auto_scenarios = True
+        self.auto_scenarios = False
         self.auto_recovery = True
         self.last_auto_event = None
 
@@ -126,6 +134,4 @@ class FireAlarmSim:
             return "ALARM"
         if "FAULT" in statuses:
             return "FAULT"
-        if "PREALARM" in statuses:
-            return "PREALARM"
         return "NORMAL"

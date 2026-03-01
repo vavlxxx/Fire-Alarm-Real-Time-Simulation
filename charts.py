@@ -39,10 +39,13 @@ class LineChart(tk.Frame):
     def draw(self, series):
         values = list(series)
         self.canvas.delete("all")
-        plot_left = 44
-        plot_right = self.width - 12
-        plot_top = 26
-        plot_bottom = self.height - 28
+        canvas_width = max(self.width, self.canvas.winfo_width())
+        canvas_height = max(self.height, self.canvas.winfo_height())
+
+        plot_left = 64
+        plot_right = canvas_width - 18
+        plot_top = 30
+        plot_bottom = canvas_height - 36
         plot_width = plot_right - plot_left
         plot_height = plot_bottom - plot_top
 
@@ -62,6 +65,8 @@ class LineChart(tk.Frame):
             fill=self.text_color,
             font=("Segoe UI", 9),
         )
+        self.canvas.create_line(plot_left, plot_top, plot_left, plot_bottom, fill=self.text_color, width=1)
+        self.canvas.create_line(plot_left, plot_bottom, plot_right, plot_bottom, fill=self.text_color, width=1)
 
         for i in range(6):
             y = plot_top + i * (plot_height / 5)
@@ -89,7 +94,7 @@ class LineChart(tk.Frame):
             )
         self.canvas.create_text(
             (plot_left + plot_right) / 2,
-            self.height - 6,
+            canvas_height - 6,
             text=self.x_label,
             anchor="s",
             fill=self.text_color,
