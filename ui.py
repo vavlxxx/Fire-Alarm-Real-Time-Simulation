@@ -3,8 +3,9 @@ import json
 from collections import deque
 from pathlib import Path
 
-from PyQt6.QtCore import QPointF, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QPointF, Qt, QTimer, QUrl, pyqtSignal
 from PyQt6.QtGui import QColor, QPainter, QPen, QPixmap, QPolygonF, QTextCursor
+from PyQt6.QtMultimedia import QAudioOutput, QMediaPlayer
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -279,6 +280,7 @@ class FireAlarmWindow(QMainWindow):
 
         self.assets_dir = Path(__file__).resolve().parent / "assets"
         self.images_dir = self.assets_dir / "images"
+        self.sounds_dir = self.assets_dir / "sounds"
 
         self.pending_logs = []
         self.map_missing_zone_logged = set()
@@ -300,6 +302,11 @@ class FireAlarmWindow(QMainWindow):
         self.last_zone_actuators = [(zone.sprinklers_on, zone.ventilation_on) for zone in self.sim.zones]
 
         self.log_lines = deque(maxlen=5000)
+        self.beep_player = None
+        self.beep_audio = None
+        self.alarm_player = None
+        self.alarm_audio = None
+        self.init_audio()
 
         self.build_ui()
         self.load_zone_layout()
@@ -416,11 +423,11 @@ class FireAlarmWindow(QMainWindow):
         scenario_group = QGroupBox(strings.t("scenario_triggers"))
         scenario_layout = QHBoxLayout(scenario_group)
         self.fire_button = QPushButton(strings.t("button_fire"))
-        self.fire_button.clicked.connect(self.trigger_fire)
+        self.fire_button.clicked.connect(lambda _checked=False: self.trigger_fire())
         self.smoke_button = QPushButton(strings.t("button_smoke"))
-        self.smoke_button.clicked.connect(self.trigger_smoke)
+        self.smoke_button.clicked.connect(lambda _checked=False: self.trigger_smoke())
         self.clear_zone_button = QPushButton(strings.t("button_clear_events"))
-        self.clear_zone_button.clicked.connect(self.clear_zone)
+        self.clear_zone_button.clicked.connect(lambda _checked=False: self.clear_zone())
         scenario_layout.addWidget(self.fire_button)
         scenario_layout.addWidget(self.smoke_button)
         scenario_layout.addWidget(self.clear_zone_button)
@@ -572,6 +579,50 @@ class FireAlarmWindow(QMainWindow):
             return png_files[0]
         raise FileNotFoundError("Map image not found")
 
+    def resolve_sound_path(self, *names):
+        for name in names:
+            candidate = self.sounds_dir / name
+            if candidate.exists():
+                return candidate
+        return None
+
+    def init_audio(self):
+        try:
+            beep_path = self.resolve_sound_path("beep.mp3")
+            if beep_path is not None:
+                self.beep_player = QMediaPlayer(self)
+                self.beep_audio = QAudioOutput(self)
+                self.beep_audio.setVolume(0.35)
+                self.beep_player.setAudioOutput(self.beep_audio)
+                self.beep_player.setSource(QUrl.fromLocalFile(str(beep_path)))
+
+            alarm_path = self.resolve_sound_path("alarm.mp3")
+            if alarm_path is not None:
+                self.alarm_player = QMediaPlayer(self)
+                self.alarm_audio = QAudioOutput(self)
+                self.alarm_audio.setVolume(0.55)
+                self.alarm_player.setAudioOutput(self.alarm_audio)
+                self.alarm_player.setSource(QUrl.fromLocalFile(str(alarm_path)))
+                self.alarm_player.setLoops(QMediaPlayer.Loops.Infinite)
+        except Exception as error:
+            self.queue_log(f"Ошибка инициализации звука: {error}")
+
+    def play_beep_sound(self):
+        if self.beep_player is None:
+            return
+        self.beep_player.stop()
+        self.beep_player.play()
+
+    def update_alarm_sound(self, alarm_active):
+        if self.alarm_player is None:
+            return
+        state = self.alarm_player.playbackState()
+        if alarm_active:
+            if state != QMediaPlayer.PlaybackState.PlayingState:
+                self.alarm_player.play()
+        elif state == QMediaPlayer.PlaybackState.PlayingState:
+            self.alarm_player.stop()
+
     def parse_zones(self, raw_zones):
         zones = []
         for raw in raw_zones:
@@ -686,6 +737,7 @@ class FireAlarmWindow(QMainWindow):
         smoke_count = sum(1 for zone in self.sim.zones if zone.state == SMOKE)
         fire_count = sum(1 for zone in self.sim.zones if zone.state == FIRE)
         self.info_label.setText(strings.t("info_summary", smoke=smoke_count, fire=fire_count))
+        self.update_alarm_sound(smoke_count > 0 or fire_count > 0)
 
         for idx, zone in enumerate(self.sim.zones):
             if zone.state != self.last_zone_states[idx]:
@@ -788,13 +840,13 @@ class FireAlarmWindow(QMainWindow):
         self.set_selected_zone(row)
 
     def on_map_zone_selected(self, zone_id):
-        self.set_selected_zone(zone_id - 1)
+        self.set_selected_zone(zone_id - 1, play_sound=True)
 
     def on_map_zone_context(self, zone_id, global_pos):
         zone = self.get_zone_by_id(zone_id)
         if zone is None:
             return
-        self.set_selected_zone(zone_id - 1)
+        self.set_selected_zone(zone_id - 1, play_sound=True)
 
         menu = QMenu(self)
         title_action = menu.addAction(strings.t("menu_zone_header", zone=zone.name))
@@ -829,9 +881,12 @@ class FireAlarmWindow(QMainWindow):
         elif chosen == vent_action:
             self.apply_zone_actuators(zone_id, vent=vent_action.isChecked(), log_change=True)
 
-    def set_selected_zone(self, index):
+    def set_selected_zone(self, index, play_sound=False):
         index = max(0, min(len(self.sim.zones) - 1, index))
+        changed = index != self.selected_zone_index
         self.selected_zone_index = index
+        if changed and play_sound:
+            self.play_beep_sound()
         self.sync_zone_controls()
         self.update_charts()
         self.update_map()
@@ -845,6 +900,8 @@ class FireAlarmWindow(QMainWindow):
         return None
 
     def resolve_zone_id(self, zone_id=None):
+        if isinstance(zone_id, bool):
+            return self.selected_zone_index + 1
         if zone_id is not None:
             return zone_id
         return self.selected_zone_index + 1
@@ -980,4 +1037,8 @@ class FireAlarmWindow(QMainWindow):
     def closeEvent(self, event):
         self.tick_timer.stop()
         self.blink_timer.stop()
+        if self.alarm_player is not None:
+            self.alarm_player.stop()
+        if self.beep_player is not None:
+            self.beep_player.stop()
         super().closeEvent(event)

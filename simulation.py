@@ -1,9 +1,11 @@
 ﻿import random
 
-
 NORMAL = "NORMAL"
 SMOKE = "SMOKE"
 FIRE = "FIRE"
+
+MAX_TEMP = 120.0
+MAX_SMOKE = 200.0
 
 SMOKE_THRESHOLD = 45.0
 SMOKE_RESET_THRESHOLD = 35.0
@@ -11,20 +13,29 @@ FIRE_THRESHOLD = 55.0
 FIRE_RESET_THRESHOLD = 45.0
 
 
-def clamp(value, min_value, max_value):
-    return max(min_value, min(max_value, value))
-
-
 class Zone:
     def __init__(self, name):
         self.name = name
         self.base_temp = 22.0
         self.base_smoke = 8.0
+
         self.temp = self.base_temp
         self.smoke = self.base_smoke
+
+        self.temp_velocity = 0.0
+        self.smoke_velocity = 0.0
+
+        self.fire_intensity = 0.0
+        self.fuel = 1.0
+
         self.sprinklers_on = False
         self.ventilation_on = False
         self.state = NORMAL
+
+        self.fire_time = 0.0
+        self.smolder = 0.0
+        self.smoke_sensor = self.base_smoke
+        self.temp_sensor = self.base_temp
 
     def evaluate_state(self):
         if self.temp >= FIRE_THRESHOLD:
@@ -40,97 +51,162 @@ class Zone:
             self.sprinklers_on = True
             self.ventilation_on = True
         elif self.state == SMOKE:
-            self.sprinklers_on = False
             self.ventilation_on = True
+            self.sprinklers_on = False
         else:
             self.sprinklers_on = False
             self.ventilation_on = False
 
     def step(self, auto_recovery, auto_control):
+        dt = 1.0
+
         self.state = self.evaluate_state()
         if auto_control:
             self.apply_auto_actuation()
 
-        temp_delta = 0.0
-        smoke_delta = 0.0
+        burning = self.fire_intensity > 0.001
 
-        if self.state == FIRE:
-            temp_delta += random.uniform(1.1, 2.0)
-            smoke_delta += random.uniform(1.8, 3.1)
-        elif self.state == SMOKE:
-            temp_delta += random.uniform(0.0, 0.5)
-            smoke_delta += random.uniform(1.0, 1.9)
+        t_grow = 90.0
+        if burning and self.fuel > 0.0:
+            self.fire_time += dt
+            target_I = min(1.0, (self.fire_time / t_grow) ** 2)
         else:
-            temp_delta += (self.base_temp - self.temp) * 0.18 + random.uniform(-0.2, 0.2)
-            smoke_delta += (self.base_smoke - self.smoke) * 0.25 + random.uniform(-0.3, 0.3)
+            target_I = 0.0
+
+        if burning:
+            target_I = max(target_I, self.fire_intensity)
+
+        sprinkler_factor = 1.0
+        if auto_recovery and self.sprinklers_on:
+            sprinkler_factor = 0.35
+
+        target_I *= sprinkler_factor
+
+        tau_fire = 10.0
+        self.fire_intensity += (target_I - self.fire_intensity) * (dt / tau_fire)
+        self.fire_intensity = max(0.0, min(1.5, self.fire_intensity))
+
+        burn_rate = 0.0025
+        self.fuel = max(0.0, self.fuel - burn_rate * self.fire_intensity * dt)
+        if self.fuel == 0.0:
+            self.fire_time = 0.0
+
+        self.smolder *= 0.985
+
+        temp_rise_max = 85.0
+        temp_target = self.base_temp + temp_rise_max * self.fire_intensity
 
         if auto_recovery and self.ventilation_on:
-            smoke_delta -= random.uniform(1.3, 2.2)
-            temp_delta -= random.uniform(0.0, 0.2)
+            temp_target -= 8.0
 
         if auto_recovery and self.sprinklers_on:
-            temp_delta -= random.uniform(2.8, 3.8)
-            smoke_delta -= random.uniform(0.7, 1.4)
+            temp_target -= 18.0
 
-        self.temp = clamp(self.temp + temp_delta, 0.0, 120.0)
-        self.smoke = clamp(self.smoke + smoke_delta, 0.0, 200.0)
+        tau_temp = 25.0
+        self.temp += (temp_target - self.temp) * (dt / tau_temp)
+
+        self.temp += random.uniform(-0.08, 0.08)
+
+        self.temp = max(0.0, min(MAX_TEMP, self.temp))
+
+        smoke_gen_fire = 3.2 * self.fire_intensity
+        smoke_gen_smolder = 1.8 * self.smolder
+        smoke_gen = smoke_gen_fire + smoke_gen_smolder
+
+        k_decay = 0.012
+
+        k_vent = 0.0
+        if auto_recovery and self.ventilation_on:
+            k_vent = 0.045
+
+        if auto_recovery and self.sprinklers_on:
+            k_decay += 0.01
+
+        self.smoke += smoke_gen * dt
+        self.smoke -= (k_decay + k_vent) * self.smoke * dt
+
+        self.smoke += random.uniform(-0.25, 0.25)
+
+        self.smoke = max(0.0, min(MAX_SMOKE, self.smoke))
+
+        tau_sensor_temp = 6.0
+        tau_sensor_smoke = 8.0
+        self.temp_sensor += (self.temp - self.temp_sensor) * (dt / tau_sensor_temp)
+        self.smoke_sensor += (self.smoke - self.smoke_sensor) * (dt / tau_sensor_smoke)
+
         self.state = self.evaluate_state()
-
         if auto_control:
             self.apply_auto_actuation()
 
-    def normalize_readings(self):
-        self.temp = self.base_temp
-        self.smoke = self.base_smoke
-
     def trigger_fire(self):
-        self.temp = max(self.temp, FIRE_THRESHOLD + 10.0)
-        self.smoke = max(self.smoke, SMOKE_THRESHOLD + 15.0)
-        self.state = self.evaluate_state()
+
+        self.fire_time = 5.0
+        self.fire_intensity = max(self.fire_intensity, 0.20)
+        self.fuel = 1.0
+
+        self.temp = min(MAX_TEMP, max(self.temp, FIRE_THRESHOLD + 8.0))
+        self.smoke = min(MAX_SMOKE, max(self.smoke, SMOKE_THRESHOLD + 12.0))
+
+        self.temp_sensor = self.temp
+        self.smoke_sensor = self.smoke
 
     def trigger_smoke(self):
-        self.smoke = max(self.smoke, SMOKE_THRESHOLD + 12.0)
-        self.state = self.evaluate_state()
+
+        self.smolder = max(self.smolder, 0.8)
 
     def clear_events(self):
-        self.normalize_readings()
+        self.temp = self.base_temp
+        self.smoke = self.base_smoke
+        self.fire_intensity = 0.0
+        self.fuel = 1.0
+        self.temp_velocity = 0.0
+        self.smoke_velocity = 0.0
         self.sprinklers_on = False
         self.ventilation_on = False
-        self.state = self.evaluate_state()
+        self.state = NORMAL
 
 
 class FireAlarmSim:
-    def __init__(self, zone_count=15, zone_name_factory=None):
+    def __init__(self, zone_count=5, zone_name_factory=None):
         if zone_name_factory is None:
-            zone_name_factory = lambda i: f"Zone {i + 1}"
+            zone_name_factory = lambda i: f"Zone {i + 1}"  # noqa
+
         self.zones = [Zone(zone_name_factory(i)) for i in range(zone_count)]
-        self.tick_count = 0
+
         self.auto_scenarios = False
         self.auto_recovery = True
         self.auto_control = False
+
+        self.tick_count = 0
         self.last_auto_event = None
 
     def tick(self):
         self.tick_count += 1
         self.last_auto_event = None
+
         if self.auto_scenarios:
             self.maybe_trigger_random_event()
+
         for zone in self.zones:
             zone.step(self.auto_recovery, self.auto_control)
 
     def maybe_trigger_random_event(self):
         if random.random() >= 0.01:
             return
+
         zone = random.choice(self.zones)
         event = random.choice(["fire", "smoke"])
+
         if event == "fire":
             zone.trigger_fire()
         else:
             zone.trigger_smoke()
+
         self.last_auto_event = (event, zone)
 
     def system_state(self):
         states = [zone.state for zone in self.zones]
+
         if FIRE in states:
             return FIRE
         if SMOKE in states:
