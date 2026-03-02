@@ -20,8 +20,10 @@ class ZoneChartsWidget(QWidget):
         self.temp_plot = pg.PlotWidget()
         self.smoke_plot = pg.PlotWidget()
 
-        self._configure_plot(self.temp_plot, "Температура", "Время, с", "Температура, °C")
-        self._configure_plot(self.smoke_plot, "Дымность", "Время, с", "Дым, ppm")
+        self._configure_plot(
+            self.temp_plot, "Температура", "Время, с", "Температура, °C"
+        )
+        self._configure_plot(self.smoke_plot, "Дымность", "Время, с", "CO2, ppm")
 
         self.temp_curve = self.temp_plot.plot(pen=pg.mkPen("#f57c00", width=2))
         self.smoke_curve = self.smoke_plot.plot(pen=pg.mkPen("#1565c0", width=2))

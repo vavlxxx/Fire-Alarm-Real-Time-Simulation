@@ -34,7 +34,7 @@ TEXT = {
     "tab_table": "Таблица зон",
     "col_zone": "Зона",
     "col_temp": "Температура, {c_unit}",
-    "col_smoke": "Дым, {ppm}",
+    "col_smoke": "CO2, {ppm}",
     "col_state": "Состояние",
     "col_sprinkler": "Спринклеры",
     "col_vent": "Дымоудаление",
