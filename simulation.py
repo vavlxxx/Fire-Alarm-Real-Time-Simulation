@@ -1,6 +1,16 @@
 ﻿import random
 
 
+NORMAL = "NORMAL"
+SMOKE = "SMOKE"
+FIRE = "FIRE"
+
+SMOKE_THRESHOLD = 45.0
+SMOKE_RESET_THRESHOLD = 35.0
+FIRE_THRESHOLD = 55.0
+FIRE_RESET_THRESHOLD = 45.0
+
+
 def clamp(value, min_value, max_value):
     return max(min_value, min(max_value, value))
 
@@ -10,85 +20,83 @@ class Zone:
         self.name = name
         self.base_temp = 22.0
         self.base_smoke = 8.0
-        self.base_co = 4.0
         self.temp = self.base_temp
         self.smoke = self.base_smoke
-        self.co = self.base_co
-        self.fire_active = False
-        self.smoke_active = False
-        self.fault_active = False
-        self.manual_call = False
         self.sprinklers_on = False
-        self.ventilation_on = True
-        self.status = "NORMAL"
+        self.ventilation_on = False
+        self.state = NORMAL
 
-    def step(self, auto_recovery):
-        if self.fault_active:
-            self.temp = clamp(self.temp + random.uniform(-0.3, 0.3), 0, 120)
-            self.smoke = clamp(self.smoke + random.uniform(-0.6, 0.6), 0, 200)
-            self.co = clamp(self.co + random.uniform(-0.3, 0.3), 0, 120)
-        elif self.fire_active:
-            temp_rise = 1.6
-            smoke_rise = 2.2
-            co_rise = 1.1
-            if auto_recovery and self.sprinklers_on:
-                temp_rise *= 0.35
-                smoke_rise *= 0.4
-                co_rise *= 0.6
-                self.temp -= 0.4
-                self.smoke -= 0.6
-            if auto_recovery and self.ventilation_on:
-                smoke_rise *= 0.85
-            self.temp = clamp(self.temp + temp_rise + random.uniform(-0.2, 0.4), 0, 120)
-            self.smoke = clamp(self.smoke + smoke_rise + random.uniform(-0.3, 0.5), 0, 200)
-            self.co = clamp(self.co + co_rise + random.uniform(-0.2, 0.3), 0, 120)
-            if auto_recovery and self.sprinklers_on and self.temp < 35 and self.smoke < 20:
-                self.fire_active = False
-        elif self.smoke_active:
-            smoke_rise = 1.4
-            if auto_recovery and self.ventilation_on:
-                smoke_rise *= 0.5
-                self.smoke -= 0.4
-            self.temp = clamp(self.temp + 0.2 + random.uniform(-0.2, 0.3), 0, 120)
-            self.smoke = clamp(self.smoke + smoke_rise + random.uniform(-0.3, 0.5), 0, 200)
-            self.co = clamp(self.co + 0.5 + random.uniform(-0.2, 0.3), 0, 120)
-            if auto_recovery and self.ventilation_on and self.smoke < 20:
-                self.smoke_active = False
+    def evaluate_state(self):
+        if self.temp >= FIRE_THRESHOLD:
+            return FIRE
+        if self.smoke >= SMOKE_THRESHOLD:
+            return SMOKE
+        if self.temp < FIRE_RESET_THRESHOLD and self.smoke < SMOKE_RESET_THRESHOLD:
+            return NORMAL
+        return self.state
+
+    def apply_auto_actuation(self):
+        if self.state == FIRE:
+            self.sprinklers_on = True
+            self.ventilation_on = True
+        elif self.state == SMOKE:
+            self.sprinklers_on = False
+            self.ventilation_on = True
         else:
-            self.temp = self.temp + (self.base_temp - self.temp) * 0.15 + random.uniform(-0.2, 0.2)
-            self.smoke = self.smoke + (self.base_smoke - self.smoke) * 0.2 + random.uniform(-0.3, 0.3)
-            self.co = self.co + (self.base_co - self.co) * 0.2 + random.uniform(-0.2, 0.2)
-            self.temp = clamp(self.temp, 0, 120)
-            self.smoke = clamp(self.smoke, 0, 200)
-            self.co = clamp(self.co, 0, 120)
+            self.sprinklers_on = False
+            self.ventilation_on = False
 
-        self.status = self.evaluate_status()
+    def step(self, auto_recovery, auto_control):
+        self.state = self.evaluate_state()
+        if auto_control:
+            self.apply_auto_actuation()
 
-    def evaluate_status(self):
-        if self.fault_active:
-            return "FAULT"
-        if self.manual_call:
-            return "ALARM"
-        if self.fire_active or self.smoke_active:
-            return "ALARM"
-        if self.temp >= 65 or self.smoke >= 60 or self.co >= 55:
-            return "ALARM"
-        return "NORMAL"
+        temp_delta = 0.0
+        smoke_delta = 0.0
+
+        if self.state == FIRE:
+            temp_delta += random.uniform(1.1, 2.0)
+            smoke_delta += random.uniform(1.8, 3.1)
+        elif self.state == SMOKE:
+            temp_delta += random.uniform(0.0, 0.5)
+            smoke_delta += random.uniform(1.0, 1.9)
+        else:
+            temp_delta += (self.base_temp - self.temp) * 0.18 + random.uniform(-0.2, 0.2)
+            smoke_delta += (self.base_smoke - self.smoke) * 0.25 + random.uniform(-0.3, 0.3)
+
+        if auto_recovery and self.ventilation_on:
+            smoke_delta -= random.uniform(1.3, 2.2)
+            temp_delta -= random.uniform(0.0, 0.2)
+
+        if auto_recovery and self.sprinklers_on:
+            temp_delta -= random.uniform(2.8, 3.8)
+            smoke_delta -= random.uniform(0.7, 1.4)
+
+        self.temp = clamp(self.temp + temp_delta, 0.0, 120.0)
+        self.smoke = clamp(self.smoke + smoke_delta, 0.0, 200.0)
+        self.state = self.evaluate_state()
+
+        if auto_control:
+            self.apply_auto_actuation()
 
     def normalize_readings(self):
         self.temp = self.base_temp
         self.smoke = self.base_smoke
-        self.co = self.base_co
 
-    def clear_events(self, clear_fault, normalize=False):
-        self.fire_active = False
-        self.smoke_active = False
-        self.manual_call = False
-        if clear_fault:
-            self.fault_active = False
-        if normalize:
-            self.normalize_readings()
-        self.status = self.evaluate_status()
+    def trigger_fire(self):
+        self.temp = max(self.temp, FIRE_THRESHOLD + 10.0)
+        self.smoke = max(self.smoke, SMOKE_THRESHOLD + 15.0)
+        self.state = self.evaluate_state()
+
+    def trigger_smoke(self):
+        self.smoke = max(self.smoke, SMOKE_THRESHOLD + 12.0)
+        self.state = self.evaluate_state()
+
+    def clear_events(self):
+        self.normalize_readings()
+        self.sprinklers_on = False
+        self.ventilation_on = False
+        self.state = self.evaluate_state()
 
 
 class FireAlarmSim:
@@ -99,6 +107,7 @@ class FireAlarmSim:
         self.tick_count = 0
         self.auto_scenarios = False
         self.auto_recovery = True
+        self.auto_control = False
         self.last_auto_event = None
 
     def tick(self):
@@ -107,31 +116,23 @@ class FireAlarmSim:
         if self.auto_scenarios:
             self.maybe_trigger_random_event()
         for zone in self.zones:
-            zone.step(self.auto_recovery)
+            zone.step(self.auto_recovery, self.auto_control)
 
     def maybe_trigger_random_event(self):
-        if random.random() < 0.01:
-            candidates = [
-                zone
-                for zone in self.zones
-                if not (zone.fire_active or zone.smoke_active or zone.fault_active)
-            ]
-            if not candidates:
-                return
-            zone = random.choice(candidates)
-            event = random.choice(["fire", "smoke", "fault"])
-            if event == "fire":
-                zone.fire_active = True
-            elif event == "smoke":
-                zone.smoke_active = True
-            else:
-                zone.fault_active = True
-            self.last_auto_event = (event, zone)
+        if random.random() >= 0.01:
+            return
+        zone = random.choice(self.zones)
+        event = random.choice(["fire", "smoke"])
+        if event == "fire":
+            zone.trigger_fire()
+        else:
+            zone.trigger_smoke()
+        self.last_auto_event = (event, zone)
 
     def system_state(self):
-        statuses = [zone.status for zone in self.zones]
-        if "ALARM" in statuses:
-            return "ALARM"
-        if "FAULT" in statuses:
-            return "FAULT"
-        return "NORMAL"
+        states = [zone.state for zone in self.zones]
+        if FIRE in states:
+            return FIRE
+        if SMOKE in states:
+            return SMOKE
+        return NORMAL

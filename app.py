@@ -1,12 +1,15 @@
-import tkinter as tk
+﻿import sys
 
-from ui import FireAlarmApp
+from PyQt6.QtWidgets import QApplication
+
+from ui import FireAlarmWindow
 
 
 def main():
-    root = tk.Tk()
-    FireAlarmApp(root)
-    root.mainloop()
+    app = QApplication(sys.argv)
+    window = FireAlarmWindow()
+    window.show()
+    sys.exit(app.exec())
 
 
 if __name__ == "__main__":
