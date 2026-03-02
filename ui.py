@@ -306,6 +306,8 @@ class FireAlarmWindow(QMainWindow):
         self.beep_audio = None
         self.alarm_player = None
         self.alarm_audio = None
+        self.smoke_alarm_player = None
+        self.smoke_alarm_audio = None
         self.init_audio()
 
         self.build_ui()
@@ -604,6 +606,15 @@ class FireAlarmWindow(QMainWindow):
                 self.alarm_player.setAudioOutput(self.alarm_audio)
                 self.alarm_player.setSource(QUrl.fromLocalFile(str(alarm_path)))
                 self.alarm_player.setLoops(QMediaPlayer.Loops.Infinite)
+                
+            smoke_alarm_path = self.resolve_sound_path("smoke_alarm.mp3")
+            if smoke_alarm_path is not None:
+                self.smoke_alarm_player = QMediaPlayer(self)
+                self.smoke_alarm_audio = QAudioOutput(self)
+                self.smoke_alarm_audio.setVolume(0.55)
+                self.smoke_alarm_player.setAudioOutput(self.smoke_alarm_audio)
+                self.smoke_alarm_player.setSource(QUrl.fromLocalFile(str(smoke_alarm_path)))
+                self.smoke_alarm_player.setLoops(QMediaPlayer.Loops.Infinite)
         except Exception as error:
             self.queue_log(f"Ошибка инициализации звука: {error}")
 
@@ -613,15 +624,111 @@ class FireAlarmWindow(QMainWindow):
         self.beep_player.stop()
         self.beep_player.play()
 
-    def update_alarm_sound(self, alarm_active):
-        if self.alarm_player is None:
-            return
-        state = self.alarm_player.playbackState()
-        if alarm_active:
-            if state != QMediaPlayer.PlaybackState.PlayingState:
-                self.alarm_player.play()
-        elif state == QMediaPlayer.PlaybackState.PlayingState:
-            self.alarm_player.stop()
+    def update_alarm_sound(self, fire_active, smoke_active):
+        if self.alarm_player is not None:
+            fire_state = self.alarm_player.playbackState()
+            if fire_active:
+                if fire_state != QMediaPlayer.PlaybackState.PlayingState:
+                    self.alarm_player.play()
+            elif fire_state == QMediaPlayer.PlaybackState.PlayingState:
+                self.alarm_player.stop()
+
+        if self.smoke_alarm_player is not None:
+            smoke_state = self.smoke_alarm_player.playbackState()
+            if smoke_active:
+                if smoke_state != QMediaPlayer.PlaybackState.PlayingState:
+                    self.smoke_alarm_player.play()
+            elif smoke_state == QMediaPlayer.PlaybackState.PlayingState:
+                self.smoke_alarm_player.stop()
+
+    def parse_zones(self, raw_zones):
+        zones = []
+        for raw in raw_zones:
+            try:
+                zone_id = int(raw.get("id"))
+            except (TypeError, ValueError):
+                continue
+
+            polygons = []
+            for raw_polygon in raw.get("polygons", []):
+                polygon = []
+                for point in raw_polygon:
+                    if not isinstance(point, (list, tuple)) or len(point) != 2:
+                        continue
+                    try:
+                        x = float(point[0])
+                        y = float(point[1])
+                    except (TypeError, ValueError):
+                        continue
+                    polygon.append((min(1.0, max(0.0, x)), min(1.0, max(0.0, y))))
+                if len(polygon) >= 3:
+                    polygons.append(polygon)
+
+            if not polygons:
+                continue
+
+            label = raw.get("label")
+            label_point = None
+            if isinstance(label, (list, tuple)) and len(label) == 2:
+                try:
+                    label_point = (float(label[0]), float(label[1]))
+                except (TypeError, ValueError):
+                    label_point = None
+
+            zones.append(
+                {
+                    "id": zone_id,
+                    "name": raw.get("name") or strings.zone_name(zone_id - 1),
+                    "polygons": polygons,
+                    "label": label_point,
+                }
+            )
+
+        zones.sort(key=lambda item: item["id"])
+        return zones
+
+    def default_zone_layout(self):
+        return {
+            "image": "images/Одноэтажный комплекс Одуванчик.png",
+            "zones": [
+                {"id": 1, "name": "Зона 1", "polygons": [[[0.0446, 0.0787], [0.2285, 0.0787], [0.2285, 0.4595], [0.0446, 0.4595]]], "label": [0.1366, 0.2691]},
+                {"id": 2, "name": "Зона 2", "polygons": [[[0.2285, 0.0787], [0.3218, 0.0787], [0.3218, 0.4595], [0.2285, 0.4595]]], "label": [0.2752, 0.2691]},
+                {"id": 3, "name": "Зона 3", "polygons": [[[0.3218, 0.0787], [0.4145, 0.0787], [0.4145, 0.4595], [0.3218, 0.4595]]], "label": [0.3682, 0.2691]},
+                {"id": 4, "name": "Зона 4", "polygons": [[[0.4145, 0.0787], [0.5997, 0.0787], [0.5997, 0.4595], [0.4145, 0.4595]]], "label": [0.5071, 0.2691]},
+                {"id": 5, "name": "Зона 5", "polygons": [[[0.5997, 0.0787], [0.7863, 0.0787], [0.7863, 0.4595], [0.5997, 0.4595]]], "label": [0.6930, 0.2691]},
+                {"id": 6, "name": "Зона 6", "polygons": [[[0.7863, 0.0787], [0.9682, 0.0787], [0.9682, 0.4595], [0.7863, 0.4595]]], "label": [0.8773, 0.2691]},
+                {"id": 7, "name": "Зона 7", "polygons": [[[0.0446, 0.5861], [0.1400, 0.5861], [0.1400, 0.9567], [0.0446, 0.9567]]], "label": [0.0923, 0.7714]},
+                {"id": 8, "name": "Зона 8", "polygons": [[[0.1400, 0.5861], [0.2285, 0.5861], [0.2285, 0.9567], [0.1400, 0.9567]]], "label": [0.1842, 0.7714]},
+                {"id": 9, "name": "Зона 9", "polygons": [[[0.2285, 0.5861], [0.3218, 0.5861], [0.3218, 0.9567], [0.2285, 0.9567]]], "label": [0.2752, 0.7714]},
+                {"id": 10, "name": "Зона 10", "polygons": [[[0.3218, 0.5861], [0.4145, 0.5861], [0.4145, 0.9567], [0.3218, 0.9567]]], "label": [0.3682, 0.7714]},
+                {"id": 11, "name": "Зона 11", "polygons": [[[0.4145, 0.5861], [0.5071, 0.5861], [0.5071, 0.9567], [0.4145, 0.9567]]], "label": [0.4608, 0.7714]},
+                {"id": 12, "name": "Зона 12", "polygons": [[[0.5071, 0.5861], [0.5997, 0.5861], [0.5997, 0.9567], [0.5071, 0.9567]]], "label": [0.5534, 0.7714]},
+                {"id": 13, "name": "Зона 13", "polygons": [[[0.5997, 0.5861], [0.7863, 0.5861], [0.7863, 0.9567], [0.5997, 0.9567]]], "label": [0.6930, 0.7714]},
+                {"id": 14, "name": "Зона 14", "polygons": [[[0.7863, 0.5861], [0.9682, 0.5861], [0.9682, 0.9567], [0.7863, 0.9567]]], "label": [0.8773, 0.7714]},
+                {"id": 15, "name": "Зона 15", "polygons": [[[0.0446, 0.4595], [0.9682, 0.4595], [0.9682, 0.5861], [0.0446, 0.5861]]], "label": [0.5064, 0.5228]},
+            ],
+        }
+
+    def load_zone_layout(self):
+        fallback = self.default_zone_layout()
+        layout_data = self.layout_metadata if self.layout_metadata else fallback
+
+        image_name = layout_data.get("image") or fallback["image"]
+        image_path = self.resolve_image_path(image_name)
+        pixmap = QPixmap(str(image_path))
+        if pixmap.isNull():
+            raise RuntimeError(f"Unable to load map image: {image_path}")
+
+        parsed_zones = self.parse_zones(layout_data.get("zones", []))
+        if not parsed_zones:
+            parsed_zones = self.parse_zones(fallback["zones"])
+
+        self.zone_layout = parsed_zones
+        self.zone_layout_by_id = {zone["id"]: zone for zone in self.zone_layout}
+        self.map_missing_zone_logged.clear()
+
+        self.map_view.set_layout(pixmap, self.zone_layout)
+
 
     def parse_zones(self, raw_zones):
         zones = []
@@ -719,6 +826,7 @@ class FireAlarmWindow(QMainWindow):
     def blink_loop(self):
         self.blink_visible = not self.blink_visible
         self.update_map()
+        self.update_system_label_blink()
 
     def update_histories(self):
         for idx, zone in enumerate(self.sim.zones):
@@ -732,13 +840,22 @@ class FireAlarmWindow(QMainWindow):
 
         system_state = self.sim.system_state()
         self.system_state_label.setText(strings.t("system_state", state=strings.state_label(system_state)))
-        self.system_state_label.setStyleSheet(f"font-size: 14px; font-weight: 700; color: {self.colors[system_state]};")
+        self.update_system_label_blink()
+
+    def update_system_label_blink(self):
+        system_state = self.sim.system_state()
+        if system_state in (SMOKE, FIRE):
+            if self.blink_visible:
+                self.system_state_label.setStyleSheet(f"font-size: 14px; font-weight: 700; color: {self.colors[system_state]};")
+            else:
+                self.system_state_label.setStyleSheet(f"font-size: 14px; font-weight: 700; color: transparent;")
+        else:
+            self.system_state_label.setStyleSheet(f"font-size: 14px; font-weight: 700; color: {self.colors[NORMAL]};")
 
         smoke_count = sum(1 for zone in self.sim.zones if zone.state == SMOKE)
         fire_count = sum(1 for zone in self.sim.zones if zone.state == FIRE)
         self.info_label.setText(strings.t("info_summary", smoke=smoke_count, fire=fire_count))
-        self.update_alarm_sound(smoke_count > 0 or fire_count > 0)
-
+        self.update_alarm_sound(fire_count > 0, smoke_count > 0)
         for idx, zone in enumerate(self.sim.zones):
             if zone.state != self.last_zone_states[idx]:
                 self.log(strings.log_state_change(zone.name, zone.state))
@@ -1039,6 +1156,8 @@ class FireAlarmWindow(QMainWindow):
         self.blink_timer.stop()
         if self.alarm_player is not None:
             self.alarm_player.stop()
+        if self.smoke_alarm_player is not None:
+            self.smoke_alarm_player.stop()
         if self.beep_player is not None:
             self.beep_player.stop()
         super().closeEvent(event)

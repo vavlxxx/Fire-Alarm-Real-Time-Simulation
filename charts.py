@@ -1,5 +1,7 @@
 import pyqtgraph as pg
 from PyQt6.QtWidgets import QGroupBox, QHBoxLayout, QVBoxLayout, QWidget
+from PyQt6.QtCore import Qt
+from simulation import FIRE_THRESHOLD, SMOKE_THRESHOLD
 
 
 class ZoneChartsWidget(QWidget):
@@ -27,6 +29,24 @@ class ZoneChartsWidget(QWidget):
 
         self.temp_curve = self.temp_plot.plot(pen=pg.mkPen("#f57c00", width=2))
         self.smoke_curve = self.smoke_plot.plot(pen=pg.mkPen("#1565c0", width=2))
+
+        temp_line = pg.InfiniteLine(
+            angle=0, movable=False, 
+            pen=pg.mkPen("r", width=2, style=Qt.PenStyle.DashLine),
+            label="Порог: {value:.1f} °C",
+            labelOpts={'position': 0.85, 'color': 'r', 'movable': True, 'fill': (255, 255, 255, 180)}
+        )
+        temp_line.setPos(FIRE_THRESHOLD)
+        self.temp_plot.addItem(temp_line)
+
+        smoke_line = pg.InfiniteLine(
+            angle=0, movable=False, 
+            pen=pg.mkPen("r", width=2, style=Qt.PenStyle.DashLine),
+            label="Порог: {value:.1f} ppm",
+            labelOpts={'position': 0.85, 'color': 'r', 'movable': True, 'fill': (255, 255, 255, 180)}
+        )
+        smoke_line.setPos(SMOKE_THRESHOLD)
+        self.smoke_plot.addItem(smoke_line)
 
         left_layout.addWidget(self.temp_plot)
         right_layout.addWidget(self.smoke_plot)
