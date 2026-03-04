@@ -40,10 +40,29 @@ class Zone:
     def evaluate_state(self, auto_recovery):
         if self.temp >= FIRE_THRESHOLD:
             return FIRE
-        if self.smoke >= SMOKE_THRESHOLD:
+        
+        if self.state == NORMAL and self.smoke >= SMOKE_THRESHOLD:
             return SMOKE
-        if self.temp < FIRE_RESET_THRESHOLD and self.smoke < SMOKE_RESET_THRESHOLD:
-            return NORMAL
+            
+        if self.state == SMOKE and self.temp >= FIRE_THRESHOLD:
+            return FIRE
+
+        if auto_recovery:
+            if self.state == FIRE:
+                if self.temp < FIRE_RESET_THRESHOLD:
+                    if self.smoke >= SMOKE_RESET_THRESHOLD:
+                        return SMOKE
+                    else:
+                        return NORMAL
+                else:
+                    return FIRE
+                    
+            if self.state == SMOKE:
+                if self.smoke < SMOKE_RESET_THRESHOLD:
+                    return NORMAL
+                else:
+                    return SMOKE
+                    
         return self.state
 
     def apply_auto_actuation(self):
@@ -145,19 +164,13 @@ class Zone:
 
     def trigger_fire(self):
 
-        self.fire_time = 5.0
-        self.fire_intensity = max(self.fire_intensity, 0.20)
+        self.fire_time = max(self.fire_time, 60.0)
+        self.fire_intensity = max(self.fire_intensity, 0.8)
         self.fuel = 1.0
-
-        self.temp = min(MAX_TEMP, max(self.temp, FIRE_THRESHOLD + 8.0))
-        self.smoke = min(MAX_SMOKE, max(self.smoke, SMOKE_THRESHOLD + 12.0))
-
-        self.temp_sensor = self.temp
-        self.smoke_sensor = self.smoke
 
     def trigger_smoke(self):
 
-        self.smolder = max(self.smolder, 0.8)
+        self.smolder = max(self.smolder, 4.0)
 
     def clear_events(self):
         self.temp = self.base_temp
